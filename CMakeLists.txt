@@ -30,8 +30,8 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-add_executable(openarm_moveit2_pose_executor_node src/motion_planner_node.cpp)
-ament_target_dependencies(openarm_moveit2_pose_executor_node
+add_executable(motion_planner_node src/motion_planner_node.cpp)
+ament_target_dependencies(motion_planner_node
   rclcpp
   geometry_msgs
   moveit_ros_planning_interface
@@ -60,7 +60,7 @@ install(TARGETS
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 install(TARGETS
-  openarm_moveit2_pose_executor_node
+  motion_planner_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

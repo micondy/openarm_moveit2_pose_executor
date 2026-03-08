@@ -87,6 +87,48 @@ x y z qx qy qz qw
 ros2 run openarm_moveit2_pose_executor motion_planner_node
 ```
 
+## 多点连续移动（独立节点）
+
+新增节点：`waypoint_sequence_node`（不修改 `motion_planner_node`）。
+
+运行命令（推荐，自动加载 MoveIt 的 robot_description 参数）：
+
+```bash
+ros2 launch openarm_moveit2_pose_executor waypoint_sequence.launch.py \
+	group_name:=left_arm \
+	orientation_is_wxyz:=true \
+	target_poses_raw:="-0.10367,0.15178,0.18325,0.99639,-5.6906e-06,1.8881e-05,-0.084869|-0.19058,0.29804,0.23138,0.99638,3.1934e-05,3.1091e-05,-0.084963"
+```
+
+说明：直接 `ros2 run` 启动会缺少 `robot_description` / `robot_description_semantic`，从而无法构建机器人模型。
+
+可选：继续追加多组位姿（每组 7 个数，组间用 `|` 分隔）：
+
+```bash
+ros2 run openarm_moveit2_pose_executor waypoint_sequence_node --ros-args \
+	-p group_name:=left_arm \
+	-p orientation_is_wxyz:=true \
+	-p target_poses_raw:="x,y,z,qw,qx,qy,qz|x,y,z,qw,qx,qy,qz"
+```
+
+可选参数：
+- `stop_on_failure`：某个点失败后是否立即停止（默认 `false`）
+- `wait_seconds_between_targets`：相邻目标点之间等待时间（默认 `0.2` 秒）
+- `planning_time`：单个点规划超时（默认 `3.0` 秒）
+- `num_planning_attempts`：单个点规划尝试次数（默认 `2`）
+- `max_velocity_scaling_factor`：最大速度缩放（默认 `0.8`）
+- `max_acceleration_scaling_factor`：最大加速度缩放（默认 `0.8`）
+- `try_cartesian_first`：先尝试笛卡尔路径（默认 `true`，手动拖拽连续点通常更快）
+- `cartesian_eef_step`：笛卡尔插值步长（默认 `0.01`）
+- `cartesian_min_fraction`：笛卡尔最小通过比例（默认 `0.9`）
+- `goal_orientation_tolerance`：姿态容差（默认 `3.14159`，更适合“主要按 xyz 走点”）
+- `orientation_is_wxyz`：四元数输入顺序是否按 `w,x,y,z`（默认 `true`）
+- `target_poses_raw`：必填，不再提供内置默认点
+
+工作空间建议：
+- `left_arm` 一般对应 `y > 0` 区域
+- `right_arm` 一般对应 `y < 0` 区域
+
 ## 说明
 
 - `group_name` 需与你的 SRDF 中分组名一致（如 `left_arm` 或 `right_arm`）。

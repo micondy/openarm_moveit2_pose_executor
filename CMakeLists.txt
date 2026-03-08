@@ -51,6 +51,15 @@ ament_target_dependencies(move_group_demo_openarm
   tf2_ros
 )
 
+add_executable(waypoint_sequence_node src/waypoint_sequence_node.cpp)
+ament_target_dependencies(waypoint_sequence_node
+  rclcpp
+  geometry_msgs
+  moveit_ros_planning_interface
+  moveit_msgs
+  moveit_core
+)
+
 include_directories(
   ${EIGEN3_INCLUDE_DIRS}
 )
@@ -61,6 +70,11 @@ install(TARGETS
 )
 install(TARGETS
   motion_planner_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS
+  waypoint_sequence_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

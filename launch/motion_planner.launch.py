@@ -20,6 +20,7 @@ def generate_launch_description():
     num_planning_attempts = LaunchConfiguration('num_planning_attempts')
     goal_position_tolerance = LaunchConfiguration('goal_position_tolerance')
     goal_orientation_tolerance = LaunchConfiguration('goal_orientation_tolerance')
+    position_only_mode = LaunchConfiguration('position_only_mode')
 
     # 加载 MoveIt 配置（包括机器人描述、语义描述和运动学配置）
     moveit_config = MoveItConfigsBuilder(
@@ -41,6 +42,7 @@ def generate_launch_description():
             {'num_planning_attempts': num_planning_attempts},
             {'goal_position_tolerance': goal_position_tolerance},
             {'goal_orientation_tolerance': goal_orientation_tolerance},
+            {'position_only_mode': position_only_mode},
             moveit_config.robot_description,
             moveit_config.robot_description_semantic,
             moveit_config.robot_description_kinematics,
@@ -59,5 +61,6 @@ def generate_launch_description():
         DeclareLaunchArgument('num_planning_attempts', default_value='10'),
         DeclareLaunchArgument('goal_position_tolerance', default_value='0.01'),
         DeclareLaunchArgument('goal_orientation_tolerance', default_value='0.05'),
+        DeclareLaunchArgument('position_only_mode', default_value='false'),
         motion_node,
     ])

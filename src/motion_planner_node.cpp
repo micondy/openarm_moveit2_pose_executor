@@ -4,6 +4,7 @@
 #include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <moveit_msgs/msg/robot_trajectory.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <openarm_moveit2_pose_executor/srv/execute_target_pose.hpp>
 
 #include <iostream>
 #include <chrono>
@@ -12,6 +13,17 @@
 #include <mutex>
 #include <optional>
 #include <cmath>
+#include <memory>
+
+/*
+
+使用说明：
+屏蔽了四元数
+ros2 launch openarm_moveit2_pose_executor motion_planner.launch.py group_name:=left_arm pose_topic_mode:=false position_only_mode:=true
+没有屏蔽
+ros2 launch openarm_moveit2_pose_executor motion_planner.launch.py group_name:=left_arm pose_topic_mode:=false position_only_mode:=false goal_orientation_tolerance:=0.15
+
+*/
 
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("motion_planner_node");
 
@@ -71,6 +83,31 @@ static bool planAndExecute(moveit::planning_interface::MoveGroupInterface &move_
     return ok;
 }
 
+static bool planAndExecutePositionOnly(moveit::planning_interface::MoveGroupInterface &move_group,
+                                       const geometry_msgs::msg::Pose &target_pose)
+{
+    move_group.setStartStateToCurrentState();
+    move_group.setPositionTarget(target_pose.position.x,
+                                 target_pose.position.y,
+                                 target_pose.position.z);
+
+    moveit::planning_interface::MoveGroupInterface::Plan plan;
+    auto plan_result = move_group.plan(plan);
+    if (!static_cast<bool>(plan_result)) {
+        RCLCPP_ERROR(LOGGER, "位置规划失败，MoveItErrorCode=%d", plan_result.val);
+        move_group.clearPoseTargets();
+        return false;
+    }
+
+    auto exec_result = move_group.execute(plan);
+    move_group.clearPoseTargets();
+    const bool ok = static_cast<bool>(exec_result);
+    if (!ok) {
+        RCLCPP_ERROR(LOGGER, "位置轨迹执行失败，MoveItErrorCode=%d", exec_result.val);
+    }
+    return ok;
+}
+
 // 解析一行输入：x y z qx qy qz qw
 static bool parsePoseLine(const std::string &line, geometry_msgs::msg::Pose &pose)
 {
@@ -92,6 +129,24 @@ static bool parsePoseLine(const std::string &line, geometry_msgs::msg::Pose &pos
     pose.orientation.z = qz;
     pose.orientation.w = qw;
     return true;
+}
+
+static void logTargetPose(const std::string &source,
+                          const std::string &frame_id,
+                          const geometry_msgs::msg::Pose &pose)
+{
+    const char *frame = frame_id.empty() ? "<empty>" : frame_id.c_str();
+    RCLCPP_INFO(LOGGER,
+                "%s target_pose: frame=%s, pos=[%.5f, %.5f, %.5f], quat=[%.6f, %.6f, %.6f, %.6f]",
+                source.c_str(),
+                frame,
+                pose.position.x,
+                pose.position.y,
+                pose.position.z,
+                pose.orientation.x,
+                pose.orientation.y,
+                pose.orientation.z,
+                pose.orientation.w);
 }
 
 template <typename T>
@@ -171,6 +226,10 @@ int main(int argc, char **argv)
         getOrDeclareParameter<bool>(move_group_node, "pose_topic_mode", false);
     const std::string pose_topic =
         getOrDeclareParameter<std::string>(move_group_node, "pose_topic", "/target_pose");
+    const bool pose_service_mode =
+        getOrDeclareParameter<bool>(move_group_node, "pose_service_mode", true);
+    const std::string pose_service_name =
+        getOrDeclareParameter<std::string>(move_group_node, "pose_service_name", "/execute_target_pose");
     const double eef_step =
         getOrDeclareParameter<double>(move_group_node, "eef_step", 0.005);
     const double min_fraction =
@@ -185,6 +244,8 @@ int main(int argc, char **argv)
         getOrDeclareParameter<double>(move_group_node, "goal_position_tolerance", 0.01);
     const double goal_orientation_tolerance =
         getOrDeclareParameter<double>(move_group_node, "goal_orientation_tolerance", 0.05);
+    const bool position_only_mode =
+        getOrDeclareParameter<bool>(move_group_node, "position_only_mode", false);
 
     // 创建 MoveGroupInterface，用于该规划组的运动规划与执行
     moveit::planning_interface::MoveGroupInterface move_group(
@@ -231,30 +292,75 @@ int main(int argc, char **argv)
                 num_planning_attempts,
                 goal_position_tolerance,
                 goal_orientation_tolerance);
+    RCLCPP_INFO(LOGGER, "位置仅模式：%s", position_only_mode ? "true（忽略姿态）" : "false");
+    RCLCPP_INFO(LOGGER, "服务模式：%s, service=%s",
+                pose_service_mode ? "true" : "false",
+                pose_service_name.c_str());
 
     RCLCPP_INFO(LOGGER, "可用的规划组：");
     std::copy(move_group.getJointModelGroupNames().begin(),
               move_group.getJointModelGroupNames().end(),
               std::ostream_iterator<std::string>(std::cout, ", "));
 
+    std::mutex move_group_mutex;
+
+    auto execute_target_pose = [&](geometry_msgs::msg::Pose target_pose,
+                                   const std::string &target_frame,
+                                   const std::string &request_source) -> std::pair<bool, std::string> {
+        const std::string planning_frame = move_group.getPlanningFrame();
+        const std::string effective_frame = target_frame.empty() ? planning_frame : target_frame;
+        logTargetPose(request_source, effective_frame, target_pose);
+        std::lock_guard<std::mutex> lock(move_group_mutex);
+        move_group.setPoseReferenceFrame(effective_frame);
+        if (!position_only_mode && !sanitizeTargetPose(target_pose, planning_group)) {
+            return {false, "目标姿态非法：四元数无效或不符合当前规划组工作空间"};
+        }
+        const bool ok = position_only_mode
+                            ? planAndExecutePositionOnly(move_group, target_pose)
+                            : planAndExecute(move_group, std::vector<geometry_msgs::msg::Pose>{target_pose}, eef_step, min_fraction, fallback_to_pose_plan);
+        return {
+            ok,
+            request_source + std::string(ok ? "执行成功" : "执行失败")
+        };
+    };
+
+    rclcpp::Service<openarm_moveit2_pose_executor::srv::ExecuteTargetPose>::SharedPtr pose_service;
+    if (pose_service_mode) {
+        pose_service = move_group_node->create_service<openarm_moveit2_pose_executor::srv::ExecuteTargetPose>(
+            pose_service_name,
+            [&](const std::shared_ptr<openarm_moveit2_pose_executor::srv::ExecuteTargetPose::Request> request,
+                std::shared_ptr<openarm_moveit2_pose_executor::srv::ExecuteTargetPose::Response> response) {
+                logTargetPose("service 收到", request->target_pose.header.frame_id, request->target_pose.pose);
+                auto result = execute_target_pose(
+                    request->target_pose.pose,
+                    request->target_pose.header.frame_id,
+                    "service 请求：");
+                response->success = result.first;
+                response->message = result.second;
+                RCLCPP_INFO(LOGGER, "收到 service 目标并执行：%s", response->success ? "成功" : "失败");
+            });
+        RCLCPP_INFO(LOGGER, "位姿执行服务已启动：%s", pose_service_name.c_str());
+    }
+
     if (pose_topic_mode) {
         RCLCPP_INFO(LOGGER, "话题模式已启用，订阅目标位姿话题：%s", pose_topic.c_str());
 
         std::mutex target_pose_mutex;
-        std::optional<geometry_msgs::msg::Pose> pending_target_pose;
+        std::optional<geometry_msgs::msg::PoseStamped> pending_target_pose;
 
         auto pose_sub = move_group_node->create_subscription<geometry_msgs::msg::PoseStamped>(
             pose_topic,
             10,
             [&](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
                 std::lock_guard<std::mutex> lock(target_pose_mutex);
-                pending_target_pose = msg->pose;
+                pending_target_pose = *msg;
+                logTargetPose("topic 收到", msg->header.frame_id, msg->pose);
                 RCLCPP_INFO(LOGGER, "收到目标位姿消息，等待执行...");
             });
 
         (void)pose_sub;
         while (rclcpp::ok()) {
-            std::optional<geometry_msgs::msg::Pose> next_pose;
+            std::optional<geometry_msgs::msg::PoseStamped> next_pose;
             {
                 std::lock_guard<std::mutex> lock(target_pose_mutex);
                 if (pending_target_pose.has_value()) {
@@ -264,13 +370,8 @@ int main(int argc, char **argv)
             }
 
             if (next_pose.has_value()) {
-                if (!sanitizeTargetPose(*next_pose, planning_group)) {
-                    RCLCPP_INFO(LOGGER, "收到话题目标并执行：失败");
-                    continue;
-                }
-                std::vector<geometry_msgs::msg::Pose> path;
-                path.push_back(*next_pose);
-                bool ok = planAndExecute(move_group, path, eef_step, min_fraction, fallback_to_pose_plan);
+                auto result = execute_target_pose(next_pose->pose, next_pose->header.frame_id, "topic 请求：");
+                bool ok = result.first;
                 RCLCPP_INFO(LOGGER, "收到话题目标并执行：%s", ok ? "成功" : "失败");
             }
 
@@ -303,15 +404,20 @@ int main(int argc, char **argv)
                 RCLCPP_WARN(LOGGER, "输入格式错误，请按: x y z qx qy qz qw");
                 continue;
             }
-            if (!sanitizeTargetPose(target_pose, planning_group)) {
+            if (!position_only_mode && !sanitizeTargetPose(target_pose, planning_group)) {
                 RCLCPP_INFO(LOGGER, "本次规划执行：失败");
                 continue;
             }
 
-            std::vector<geometry_msgs::msg::Pose> path;
-            path.push_back(target_pose);
+            logTargetPose("terminal 输入", move_group.getPlanningFrame(), target_pose);
 
-            bool ok = planAndExecute(move_group, path, eef_step, min_fraction, fallback_to_pose_plan);
+            bool ok;
+            {
+                std::lock_guard<std::mutex> lock(move_group_mutex);
+                ok = position_only_mode
+                         ? planAndExecutePositionOnly(move_group, target_pose)
+                         : planAndExecute(move_group, std::vector<geometry_msgs::msg::Pose>{target_pose}, eef_step, min_fraction, fallback_to_pose_plan);
+            }
             RCLCPP_INFO(LOGGER, "本次规划执行：%s", ok ? "成功" : "失败");
         }
     }

@@ -4,6 +4,7 @@ ROS 2 + MoveIt 2 位姿执行包。
 
 当前主要功能：
 - 启动 MoveGroupInterface 后，支持通过话题接收目标位姿（默认）。
+- 启动位姿执行 service（默认 `/execute_target_pose`），支持请求-执行-返回结果。
 - 支持可选的终端交互输入目标位姿。
 - 对输入位姿执行笛卡尔路径规划并执行。
 - 支持重复接收多组位姿，逐次规划执行。
@@ -11,6 +12,7 @@ ROS 2 + MoveIt 2 位姿执行包。
 ## 包内容
 
 - `src/motion_planner_node.cpp`：支持话题模式与交互模式的位姿规划执行节点。
+- `srv/ExecuteTargetPose.srv`：位姿执行服务接口（请求 PoseStamped，响应 success/message）。
 - `src/move_group_demo_openarm.cpp`：MoveIt 示例风格演示代码（含可视化/障碍物流程）。
 - `launch/motion_planner.launch.py`：启动主节点并加载 MoveIt 配置与路径参数。
 - `config/path.yaml`：路径参数文件（按需使用）。
@@ -56,6 +58,12 @@ ros2 launch openarm_moveit2_pose_executor motion_planner.launch.py \
 	group_name:=right_arm \
 	pose_topic_mode:=true \
 	pose_topic:=/target_pose
+```
+
+5. 通过 service 请求位姿执行（推荐给 client 程序调用）：
+
+```bash
+ros2 service call /execute_target_pose openarm_moveit2_pose_executor/srv/ExecuteTargetPose "{target_pose: {header: {frame_id: 'world'}, pose: {position: {x: 0.05, y: 0.18, z: 0.30}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}}"
 ```
 
 5. 可选：切回终端交互输入模式：

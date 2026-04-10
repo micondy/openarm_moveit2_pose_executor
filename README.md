@@ -5,6 +5,7 @@ ROS 2 + MoveIt 2 位姿执行包。
 当前主要功能：
 - 启动 MoveGroupInterface 后，支持通过话题接收目标位姿（默认）。
 - 启动位姿执行 service（默认 `/execute_target_pose`），支持请求-执行-返回结果。
+- 提供基于 MoveIt Task Constructor（MTC）的抓取放置 service（默认 `/execute_pick_place`）。
 - 支持可选的终端交互输入目标位姿。
 - 对输入位姿执行笛卡尔路径规划并执行。
 - 支持重复接收多组位姿，逐次规划执行。
@@ -14,7 +15,9 @@ ROS 2 + MoveIt 2 位姿执行包。
 - `src/motion_planner_node.cpp`：支持话题模式与交互模式的位姿规划执行节点。
 - `srv/ExecuteTargetPose.srv`：位姿执行服务接口（请求 PoseStamped，响应 success/message）。
 - `src/move_group_demo_openarm.cpp`：MoveIt 示例风格演示代码（含可视化/障碍物流程）。
+- `src/mtc_pick_place_node.cpp`：基于 MTC 的抓取放置服务节点。
 - `launch/motion_planner.launch.py`：启动主节点并加载 MoveIt 配置与路径参数。
+- `launch/mtc_pick_place.launch.py`：启动 MTC 抓取放置节点。
 - `config/path.yaml`：路径参数文件（按需使用）。
 
 ## 依赖
@@ -97,7 +100,7 @@ ros2 run openarm_moveit2_pose_executor motion_planner_node
 
 ## 多点连续移动（独立节点）
 
-新增节点：`waypoint_sequence_node`（不修改 `motion_planner_node`）。
+节点：`waypoint_sequence_node`（不修改 `motion_planner_node`）。
 
 运行命令（推荐，自动加载 MoveIt 的 robot_description 参数）：
 
@@ -136,6 +139,84 @@ ros2 run openarm_moveit2_pose_executor waypoint_sequence_node --ros-args \
 工作空间建议：
 - `left_arm` 一般对应 `y > 0` 区域
 - `right_arm` 一般对应 `y < 0` 区域
+
+## MTC 抓取放置
+
+节点：`mtc_pick_place_node`，通过 `openarm_moveit2_pose_executor/srv/ExecutePickPlace` 服务触发一次完整抓取放置流程。
+
+### 1) 依赖说明
+
+该节点依赖 MoveIt Task Constructor：`moveit_task_constructor_core`。
+
+示例安装（Ubuntu + ROS 2）：
+
+```bash
+sudo apt install ros-${ROS_DISTRO}-moveit-task-constructor-core
+```
+
+> 若系统未安装该依赖，本包会自动跳过 `mtc_pick_place_node` 的编译，不影响其它节点。
+
+### 2) 启动（单臂）
+
+右臂：
+
+```bash
+ros2 launch openarm_moveit2_pose_executor mtc_pick_place.launch.py \
+	arm_group:=right_arm hand_group:=right_gripper eef_name:=right_ee \
+	hand_frame:=openarm_right_gripper_tip ik_frame_link:=openarm_right_gripper_tip \
+	service_name:=/execute_pick_place_right node_name:=mtc_pick_place_right_node
+```
+
+左臂：
+
+```bash
+ros2 launch openarm_moveit2_pose_executor mtc_pick_place.launch.py \
+	arm_group:=left_arm hand_group:=left_gripper eef_name:=left_ee \
+	hand_frame:=openarm_left_gripper_tip ik_frame_link:=openarm_left_gripper_tip \
+	service_name:=/execute_pick_place_left node_name:=mtc_pick_place_left_node
+```
+
+### 3) 启动（双臂）
+
+```bash
+ros2 launch openarm_moveit2_pose_executor mtc_pick_place_dual.launch.py
+```
+
+默认会同时启动两个服务：
+- 右臂：`/execute_pick_place_right`
+- 左臂：`/execute_pick_place_left`
+
+### 4) 调用服务
+
+右臂调用示例：
+
+```bash
+ros2 service call /execute_pick_place_right openarm_moveit2_pose_executor/srv/ExecutePickPlace "{\
+object_pose: {header: {frame_id: 'world'}, pose: {position: {x: 0.273, y: -0.152, z: 0.304}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}, \
+pick_pose:   {header: {frame_id: 'world'}, pose: {position: {x: 0.273, y: -0.156, z: 0.290}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}, \
+place_pose:  {header: {frame_id: 'world'}, pose: {position: {x: 0.227, y: -0.422, z: 0.430}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}, \
+next_pose:   {header: {frame_id: 'world'}, pose: {position: {x: 0.227, y: -0.422, z: 0.450}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}}"
+```
+
+左臂调用示例（通常使用 `y > 0` 区域）：
+
+```bash
+ros2 service call /execute_pick_place_left openarm_moveit2_pose_executor/srv/ExecutePickPlace "{\
+object_pose: {header: {frame_id: 'world'}, pose: {position: {x: 0.273, y: 0.152, z: 0.304}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}, \
+pick_pose:   {header: {frame_id: 'world'}, pose: {position: {x: 0.273, y: 0.156, z: 0.290}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}, \
+place_pose:  {header: {frame_id: 'world'}, pose: {position: {x: 0.227, y: 0.422, z: 0.430}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}, \
+next_pose:   {header: {frame_id: 'world'}, pose: {position: {x: 0.227, y: 0.422, z: 0.450}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}}"
+```
+
+### 5) 常用参数
+
+- `pick_pose`: `[x, y, z, qx, qy, qz, qw]`
+- `place_pose`: `[x, y, z, qx, qy, qz, qw]`
+- `object_pose`: 目标物在世界坐标中的初始位姿
+- `object_size`: 目标物尺寸（默认 box）
+- `table_pose` / `table_size`: 桌面碰撞体参数
+- `gripper_open_pose` / `gripper_close_pose`: 手爪命名姿态
+- `arm_home_pose`: 任务结束回归命名姿态
 
 ## 说明
 

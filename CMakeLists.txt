@@ -17,10 +17,14 @@ find_package(moveit_visual_tools REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(shape_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(Boost REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ExecuteTargetPose.srv"
+  "srv/ExecutePickPlace.srv"
   DEPENDENCIES geometry_msgs
 )
 
@@ -68,6 +72,30 @@ ament_target_dependencies(waypoint_sequence_node
   moveit_core
 )
 
+option(BUILD_MTC_PICK_PLACE "Build MTC pick-place node" ON)
+if(BUILD_MTC_PICK_PLACE)
+  find_package(moveit_task_constructor_core QUIET)
+  if(moveit_task_constructor_core_FOUND)
+    add_executable(mtc_pick_place_node src/mtc_pick_place_node.cpp)
+    ament_target_dependencies(mtc_pick_place_node
+      rclcpp
+      std_srvs
+      geometry_msgs
+      shape_msgs
+      visualization_msgs
+      moveit_ros_planning_interface
+      moveit_msgs
+      moveit_core
+      moveit_visual_tools
+      moveit_task_constructor_core
+    )
+    rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+    target_link_libraries(mtc_pick_place_node "${cpp_typesupport_target}")
+  else()
+    message(WARNING "moveit_task_constructor_core not found, skip building mtc_pick_place_node")
+  endif()
+endif()
+
 include_directories(
   ${EIGEN3_INCLUDE_DIRS}
 )
@@ -85,6 +113,13 @@ install(TARGETS
   waypoint_sequence_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
+
+if(TARGET mtc_pick_place_node)
+  install(TARGETS
+    mtc_pick_place_node
+    RUNTIME DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
 
 install(DIRECTORY launch config src
         DESTINATION share/${PROJECT_NAME})

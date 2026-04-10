@@ -16,13 +16,20 @@
 #include <memory>
 
 /*
-
+当前的target_pose默认给gripper_tip（可通过参数 end_effector_link 覆盖）
 使用说明：
 屏蔽了四元数
 ros2 launch openarm_moveit2_pose_executor motion_planner.launch.py group_name:=left_arm pose_topic_mode:=false position_only_mode:=true
 没有屏蔽
-ros2 launch openarm_moveit2_pose_executor motion_planner.launch.py group_name:=left_arm pose_topic_mode:=false position_only_mode:=false goal_orientation_tolerance:=0.15
+ros2 launch openarm_moveit2_pose_executor motion_planner.launch.py group_name:=left_arm pose_topic_mode:=false position_only_mode:=false goal_position_tolerance:=0.001 goal_orientation_tolerance:=0.001
 
+ros2 service call /execute_target_pose openarm_moveit2_pose_executor/srv/ExecuteTargetPose "{target_pose: {header: {frame_id: 'world'}, pose: {position: {x: -0.0768, y: 0.1516, z: 0.1853}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}}"
+
+ros2 service call /execute_target_pose openarm_moveit2_pose_executor/srv/ExecuteTargetPose "{target_pose: {header: {frame_id: 'world'}, pose: {position: {x: 0.273, y: 0.085, z: 0.402}, orientation: {x: 1.0, y: 0.0, z: 0.0, w: 0.0}}}}"
+1 -0.077764; 0.16036; 0.18584  0.99997; 0.005809; -0.0019414; -0.0042771
+2 -0.077653; 0.15976; 0.18583  0.99998; 0.0042868; -0.0015409; -0.0034171
+3 -0.077106; 0.15812; 0.18584 0.99999; 0.0046995; -1.547e-05; -0.00055092
+4 -0.077677; 0.16018; 0.18584 0.99998; 0.0054841; -0.0015504; -0.0040079
 */
 
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("motion_planner_node");
@@ -250,6 +257,17 @@ int main(int argc, char **argv)
     // 创建 MoveGroupInterface，用于该规划组的运动规划与执行
     moveit::planning_interface::MoveGroupInterface move_group(
         move_group_node, planning_group);
+
+    const std::string default_end_effector_link =
+        (planning_group == "left_arm") ? "openarm_left_gripper_tip"
+        : (planning_group == "right_arm") ? "openarm_right_gripper_tip"
+        : move_group.getEndEffectorLink();
+    const std::string end_effector_link =
+        getOrDeclareParameter<std::string>(move_group_node, "end_effector_link", default_end_effector_link);
+    if (!end_effector_link.empty()) {
+        move_group.setEndEffectorLink(end_effector_link);
+    }
+
     move_group.setPlanningTime(planning_time);
     move_group.setNumPlanningAttempts(num_planning_attempts);
     move_group.setGoalPositionTolerance(goal_position_tolerance);

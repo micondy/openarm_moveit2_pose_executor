@@ -1,0 +1,7 @@
+geometry_msgs/PoseStamped object_pose
+geometry_msgs/PoseStamped pick_pose
+geometry_msgs/PoseStamped place_pose
+geometry_msgs/PoseStamped next_pose
+---
+bool success
+string message
